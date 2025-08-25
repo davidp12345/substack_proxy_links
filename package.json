@@ -1,0 +1,14 @@
+{
+  "name": "substack-proxy-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local tools to generate and deploy simple redirect HTML proxies for Substack links.",
+  "scripts": {
+    "proxy:generate": "node proxy_tools/generate_proxy.js",
+    "deploy": "gh-pages -d proxies -m 'deploy proxies'"
+  },
+  "devDependencies": {
+    "gh-pages": "^6.1.1"
+  }
+}
+
