@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+  <style>
+    .status { margin-top:10px; padding:8px; border-radius:4px; }
+    .status.generating { background:#f0f0f0; }
+    .status.error { background:#ffe6e6; color:#cc0000; }
+    .status.success { background:#e6ffe6; }
+    .urls { font-size:12px; }
+    .url-item { margin:8px 0; }
+    .url-item label { font-weight:bold; display:block; }
+    .url-item a { color:#0066cc; word-break:break-all; }
+    .badge { display:inline-block; padding:2px 6px; border-radius:3px; font-size:11px; margin-left:4px; }
+    .copied { margin-top:8px; font-weight:bold; color:#008800; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h2>Substack Notes Toolkit</h2>
+    </div>
+
+    <div class="toggles" id="toggles">
+      <label><input type="checkbox" id="toggle-substack"> Substack Post</label>
+      <label><input type="checkbox" id="toggle-linkedin"> LinkedIn</label>
+      <label><input type="checkbox" id="toggle-x"> X (Twitter)</label>
+    </div>
+
+    <div id="loading" class="loading hidden">
+      <div class="spinner"></div>
+      <p>Generating candidates...</p>
+    </div>
+
+    <div id="error" class="error hidden">
+      <p id="error-message">Error occurred</p>
+    </div>
+
+    <div id="candidates" class="candidates hidden"></div>
+
+    <div id="generate-section" class="generate-section">
+      <button id="generate-btn" class="generate-btn">Generate 10 Candidates</button>
+    </div>
+
+    <hr>
+    <div id="proxy-section" class="proxy-section">
+      <label for="proxy-input" class="proxy-label">Substack post URL</label>
+      <input id="proxy-input" class="proxy-input" type="text" placeholder="https://substack.com/...">
+      <div class="proxy-actions">
+        <button id="proxy-copy-url" class="edit-btn">Copy Proxy URL</button>
+      </div>
+      <div id="proxy-status" class="proxy-label"></div>
+      <div id="proxy-progress" class="status generating" style="display:none">
+        <div id="proxy-progress-text">Generating…</div>
+        <div id="proxy-progress-bar" style="margin-top:6px;height:6px;background:#eee;border-radius:3px;overflow:hidden">
+          <div id="proxy-progress-fill" style="width:0%;height:100%;background:#ff6719;transition:width .3s ease"></div>
+        </div>
+      </div>
+      <div id="proxy-output-links" class="proxy-label"></div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

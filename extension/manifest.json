@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Substack Proxy Publisher",
+  "version": "1.0.0",
+  "permissions": ["storage", "contextMenus", "activeTab", "scripting", "clipboardWrite", "notifications"],
+  "host_permissions": ["https://*.substack.com/*", "https://substack.com/*", "*://*/"],
+  "background": { "service_worker": "background.js" },
+  "options_page": "options.html",
+  "action": { "default_title": "Proxy Publisher" }
+}
+

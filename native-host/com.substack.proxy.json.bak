@@ -1,0 +1,9 @@
+{
+  "name": "com.substack.proxy",
+  "description": "Substack Proxy Generator",
+  "path": "/Users/davidpaykin/Documents/Consolidated_Substack_Notes_Tools/native-host/proxy-generator.js",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://YOUR_EXTENSION_ID_HERE/"
+  ]
+}
