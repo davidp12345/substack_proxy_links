@@ -1,7 +1,1 @@
-{
-  "name": "proxy-publisher",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "description": "Vercel API for generating GitHub Pages proxy links"
-}
+git add package.json
