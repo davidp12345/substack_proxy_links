@@ -1,33 +1,7 @@
 {
-<<<<<<< HEAD
-  "name": "substack-proxy-tools",
+  "name": "proxy-publisher",
   "version": "1.0.0",
   "private": true,
-  "description": "Local tools to generate and deploy simple redirect HTML proxies for Substack links.",
-  "scripts": {
-    "proxy:generate": "node proxy_tools/generate_proxy.js",
-    "deploy": "gh-pages -d proxies -m 'deploy proxies'"
-  },
-  "devDependencies": {
-    "gh-pages": "^6.1.1"
-  }
+  "description": "Vercel API for generating GitHub Pages proxy links"
 }
 
-=======
-  "name": "magic-links-proxy",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "generate": "node proxy_tools/generate_proxy.js",
-    "deploy": "gh-pages -d proxies"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
-  "devDependencies": {
-    "gh-pages": "^6.3.0"
-  }
-}
->>>>>>> 5ffabf9e4acf3034de42fa2ec6957e90bdc6cccc
