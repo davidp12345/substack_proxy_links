@@ -1,1 +1,10 @@
-git add package.json
+{
+  "name": "proxy-publisher",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Vercel API for generating GitHub Pages proxy links",
+  "dependencies": {
+    "@octokit/app": "^14.0.0"
+  }
+}
