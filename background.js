@@ -10,13 +10,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   // Accept popup-style message: { type: 'proxy:generate', url }
   if (request && request.type === 'proxy:generate' && request.url) {
-    handleProxyGeneration(request.url, (resp) => {
-      if (resp && resp.success) {
-        sendResponse({ ok: true, pages_url: resp.proxyUrl, fallback_url: resp.proxyUrl, ready: false, slug: resp.filename });
-      } else {
-        sendResponse({ ok: false, error: resp?.error || 'Proxy generation failed' });
-      }
-    });
+    // Pass through the service response from handleProxyGeneration as-is
+    handleProxyGeneration(request.url, sendResponse);
     return true;
   }
 });

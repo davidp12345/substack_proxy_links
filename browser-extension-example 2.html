@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body {
+            width: 350px;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        input[type="url"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            background: #ff6719;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            width: 100%;
+        }
+        button:hover {
+            background: #e55a15;
+        }
+        .status {
+            margin-top: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .instructions {
+            font-size: 12px;
+            color: #666;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h3>Substack Magic Links</h3>
+    </div>
+    
+    <div class="form-group">
+        <label for="substackUrl">Substack URL:</label>
+        <input type="url" id="substackUrl" placeholder="https://substack.com/home/post/p-123456">
+    </div>
+    
+    <button id="copyProxyUrl">Copy Proxy URL</button>
+    
+    <div id="status"></div>
+    
+    <div class="instructions">
+        <strong>Setup Instructions:</strong><br>
+        1. Right-click this extension → Inspect → Console<br>
+        2. Run: <code>chrome.storage.sync.set({ proxyHostBase: 'https://yourusername.github.io/your-repo-name' })</code><br>
+        3. Replace with your actual GitHub Pages URL
+    </div>
+
+    <script>
+        // This is a reference implementation for the browser extension
+        // The actual extension would need proper Chrome extension APIs
+        
+        function normalizeUrl(url) {
+            return url
+                .replace(/^https?:\/\//, '')
+                .replace(/^www\./, '')
+                .replace(/[^a-zA-Z0-9]/g, '-')
+                .replace(/-+/g, '-')
+                .replace(/^-|-$/g, '');
+        }
+        
+        document.getElementById('copyProxyUrl').addEventListener('click', async function() {
+            const substackUrl = document.getElementById('substackUrl').value;
+            const statusDiv = document.getElementById('status');
+            
+            if (!substackUrl) {
+                statusDiv.innerHTML = '<div class="error">Please enter a Substack URL</div>';
+                return;
+            }
+            
+            try {
+                // In a real extension, this would use chrome.storage.sync.get
+                const proxyHostBase = 'https://yourusername.github.io/your-repo-name'; // Replace with actual
+                const normalizedName = normalizeUrl(substackUrl);
+                const proxyUrl = `${proxyHostBase}/${normalizedName}.html`;
+                
+                // In a real extension, this would use the Clipboard API
+                await navigator.clipboard.writeText(proxyUrl);
+                
+                statusDiv.innerHTML = `<div class="success">Copied: ${proxyUrl}</div>`;
+            } catch (error) {
+                statusDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        });
+        
+        // Auto-fill from current tab (in real extension)
+        // chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+        //     if (tabs[0].url.includes('substack.com')) {
+        //         document.getElementById('substackUrl').value = tabs[0].url;
+        //     }
+        // });
+    </script>
+</body>
+</html>

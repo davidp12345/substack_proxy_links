@@ -136,18 +136,20 @@ class UnifiedPopup {
         progressBox.style.display = 'none';
         return;
       }
-      const links = document.getElementById('proxy-output-links');
-      links.textContent = '';
       const pages = res.pages_url || '';
       const fallback = res.fallback_url || '';
-      // Show both links so the user can click the one that already works
-      if (pages) {
-        const a = document.createElement('a'); a.href = pages; a.textContent = 'Open static Pages link'; a.target='_blank';
-        links.appendChild(a); links.appendChild(document.createElement('br'));
-      }
-      if (fallback && fallback !== pages){
-        const b = document.createElement('a'); b.href = fallback; b.textContent = 'Open fallback (works immediately)'; b.target='_blank';
-        links.appendChild(b);
+      // Restore legacy link handling to avoid regressions; hidden via CSS
+      const links = document.getElementById('proxy-output-links');
+      if (links) {
+        links.textContent = '';
+        if (pages) {
+          const a = document.createElement('a'); a.href = pages; a.textContent = 'Open static Pages link'; a.target = '_blank';
+          links.appendChild(a); links.appendChild(document.createElement('br'));
+        }
+        if (fallback && fallback !== pages) {
+          const b = document.createElement('a'); b.href = fallback; b.textContent = 'Open fallback (works immediately)'; b.target = '_blank';
+          links.appendChild(b);
+        }
       }
       // Copy whichever is immediately ready — background already waited; if not ready, copy fallback
       // Poll readiness up to ~30s; update UI progress and messages
