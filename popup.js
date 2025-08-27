@@ -32,7 +32,14 @@ class UnifiedPopup {
 
       // Prefill proxy input from current tab if it looks like a Substack post
       const proxyInput = document.getElementById('proxy-input');
-      if (isSubstackPost) proxyInput.value = tab.url;
+      if (isSubstackPost) {
+        // Clean URL by removing @ prefix if it exists
+        let cleanUrl = tab.url;
+        if (cleanUrl.startsWith('@')) {
+          cleanUrl = cleanUrl.substring(1);
+        }
+        proxyInput.value = cleanUrl;
+      }
       document.getElementById('proxy-copy-url').addEventListener('click', () => this.generateAndCopyProxy());
     } catch (err) {
       console.error('Popup init failed', err);
@@ -47,9 +54,18 @@ class UnifiedPopup {
         world: 'MAIN',
         function: () => {
           try {
-            const u = new URL(location.href);
+            // Clean URL by removing @ prefix if it exists
+            let cleanHref = location.href;
+            if (cleanHref.startsWith('@')) {
+              cleanHref = cleanHref.substring(1);
+            }
+            
+            const u = new URL(cleanHref);
             const path = u.pathname || '';
-            const looksLikePostPath = /(^|\/)p\//.test(path) || path.includes('/home/post/') || path.includes('/posts/');
+            const looksLikePostPath = /(^|\/)p\//.test(path) || 
+                                    path.includes('/home/post/') || 
+                                    path.includes('/posts/') ||
+                                    path.includes('/p-');
 
             // Heuristic: presence of typical Substack DOM markers OR enough article text
             const titleSelectors = ['h1[class*="post-title"]','h1[class*="title"]','.post-header h1','article h1','h1'];
@@ -76,16 +92,44 @@ class UnifiedPopup {
               document.querySelector('meta[property="og:site_name"][content*="Substack"]') ||
               document.querySelector('script[src*="substack"], link[href*="substackcdn"]')
             );
-            const hostOk = location.hostname.endsWith('.substack.com') || location.hostname === 'substack.com';
+            const hostOk = u.hostname.endsWith('.substack.com') || u.hostname === 'substack.com';
             return (metaOk || hostOk) && (looksLikePostPath || totalLen > 200 || hasTitle);
           } catch { return false; }
         }
       });
       if (result) return true;
-      const url = new URL(tabUrl);
-      return /(^|\/)p\//.test(url.pathname) || url.pathname.includes('/home/post/') || url.hostname.endsWith('.substack.com') || url.hostname === 'substack.com';
-    } catch {
-      try { const u = new URL(tabUrl); return /(^|\/)p\//.test(u.pathname) || u.pathname.includes('/home/post/') || u.hostname.endsWith('.substack.com') || u.hostname === 'substack.com'; } catch { return false; }
+      
+      // Clean tabUrl by removing @ prefix if it exists
+      let cleanTabUrl = tabUrl;
+      if (cleanTabUrl.startsWith('@')) {
+        cleanTabUrl = cleanTabUrl.substring(1);
+      }
+      
+      try {
+        const url = new URL(cleanTabUrl);
+        return /(^|\/)p\//.test(url.pathname) || 
+               url.pathname.includes('/home/post/') || 
+               url.pathname.includes('/p-') ||
+               url.hostname.endsWith('.substack.com') || 
+               url.hostname === 'substack.com';
+      } catch (urlError) {
+        console.error('Error parsing URL:', cleanTabUrl, urlError);
+        return false;
+      }
+    } catch (error) {
+      console.error('Error in detectSubstackPost:', error);
+      try { 
+        let cleanTabUrl = tabUrl;
+        if (cleanTabUrl.startsWith('@')) {
+          cleanTabUrl = cleanTabUrl.substring(1);
+        }
+        const u = new URL(cleanTabUrl); 
+        return /(^|\/)p\//.test(u.pathname) || 
+               u.pathname.includes('/home/post/') || 
+               u.pathname.includes('/p-') ||
+               u.hostname.endsWith('.substack.com') || 
+               u.hostname === 'substack.com'; 
+      } catch { return false; }
     }
   }
 
@@ -122,16 +166,33 @@ class UnifiedPopup {
     const progressFill = document.getElementById('proxy-progress-fill');
     const raw = document.getElementById('proxy-input').value.trim();
     if (!raw) { status.textContent = 'Paste a Substack URL'; return; }
-    let u; try { u = new URL(raw); } catch { status.textContent = 'Invalid URL'; return; }
-    if (!(u.hostname.endsWith('substack.com') || u.hostname === 'substack.com')) { status.textContent = 'Not a Substack URL'; return; }
+    
+    // Clean URL by removing @ prefix if it exists
+    let cleanUrl = raw;
+    if (cleanUrl.startsWith('@')) {
+      cleanUrl = cleanUrl.substring(1);
+    }
+    
+    let u; 
+    try { 
+      u = new URL(cleanUrl); 
+    } catch { 
+      status.textContent = 'Invalid URL format: ' + cleanUrl; 
+      return; 
+    }
+    
+    if (!(u.hostname.endsWith('substack.com') || u.hostname === 'substack.com')) { 
+      status.textContent = 'Not a Substack URL: ' + u.hostname; 
+      return; 
+    }
     status.textContent = 'Generating…';
     progressBox.style.display = 'block';
     progressText.textContent = 'Generating…';
     progressFill.style.width = '10%';
     try{
-      const res = await chrome.runtime.sendMessage({ type:'proxy:generate', url: u.toString() });
+      const res = await chrome.runtime.sendMessage({ type:'proxy:generate', url: cleanUrl });
       if (!res || !res.ok){
-        try { await navigator.clipboard.writeText(u.toString()); status.textContent = 'Copied original URL (proxy failed)'; }
+        try { await navigator.clipboard.writeText(cleanUrl); status.textContent = 'Copied original URL (proxy failed)'; }
         catch { status.textContent = res?.error || 'Generation failed'; }
         progressBox.style.display = 'none';
         return;
@@ -175,8 +236,9 @@ class UnifiedPopup {
       progressText.textContent = ready ? 'Live on Pages' : 'Using fallback link';
       setTimeout(()=>{ progressBox.style.display = 'none'; }, 600);
     }catch(e){
-      try { await navigator.clipboard.writeText(u.toString()); status.textContent = 'Copied original URL (proxy failed)'; }
-      catch { status.textContent = 'Generation failed'; }
+      console.error('Proxy generation error:', e);
+      try { await navigator.clipboard.writeText(cleanUrl); status.textContent = 'Copied original URL (proxy failed)'; }
+      catch { status.textContent = 'Generation failed: ' + (e.message || e); }
       progressBox.style.display = 'none';
     }
   }

@@ -47,12 +47,38 @@ async function handleMessage(message) {
 }
 
 function normalizeUrl(url) {
-  return url
-    .replace(/^https?:\/\//, '')
-    .replace(/^www\./, '')
-    .replace(/[^a-zA-Z0-9]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
+  try {
+    // Clean URL by removing @ prefix if it exists
+    let cleanUrl = url;
+    if (cleanUrl.startsWith('@')) {
+      cleanUrl = cleanUrl.substring(1);
+    }
+    
+    const urlObj = new URL(cleanUrl);
+    let normalized = urlObj.hostname + urlObj.pathname;
+    
+    // Handle query parameters for unique filenames
+    if (urlObj.search) {
+      const searchParams = new URLSearchParams(urlObj.search);
+      const importantParams = [];
+      if (searchParams.get('source')) importantParams.push('source-' + searchParams.get('source'));
+      if (searchParams.get('utm_source')) importantParams.push('utm-' + searchParams.get('utm_source'));
+      if (importantParams.length > 0) {
+        normalized += '?' + importantParams.join('&');
+      }
+    }
+    
+    return normalized
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/[^a-zA-Z0-9]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+  } catch (error) {
+    console.error('Error normalizing URL:', error);
+    // Fallback to timestamp-based name
+    return 'substack-fallback-' + Date.now();
+  }
 }
 
 function generateProxyHtml(originalUrl) {
@@ -137,8 +163,17 @@ function generateProxyHtml(originalUrl) {
 
 async function generateAndDeployProxy(originalUrl) {
   try {
+    // Clean URL by removing @ prefix if it exists
+    let cleanUrl = originalUrl;
+    if (cleanUrl.startsWith('@')) {
+      cleanUrl = cleanUrl.substring(1);
+    }
+    
     // Validate URL
-    new URL(originalUrl);
+    const urlObj = new URL(cleanUrl);
+    if (!(urlObj.hostname.endsWith('.substack.com') || urlObj.hostname === 'substack.com')) {
+      throw new Error('Not a Substack URL: ' + urlObj.hostname);
+    }
     
     // Find the magic-links-proxy directory
     const magicLinksDir = path.join(__dirname, '..', 'magic-links-proxy');
@@ -150,12 +185,12 @@ async function generateAndDeployProxy(originalUrl) {
     }
     
     // Generate filename
-    const normalizedName = normalizeUrl(originalUrl);
+    const normalizedName = normalizeUrl(cleanUrl);
     const filename = `${normalizedName}.html`;
     const filepath = path.join(proxiesDir, filename);
     
     // Generate HTML content
-    const htmlContent = generateProxyHtml(originalUrl);
+    const htmlContent = generateProxyHtml(cleanUrl);
     
     // Write file
     fs.writeFileSync(filepath, htmlContent, 'utf8');
@@ -171,6 +206,7 @@ async function generateAndDeployProxy(originalUrl) {
       success: true,
       proxyUrl: proxyUrl,
       filename: filename,
+      originalUrl: cleanUrl,
       message: 'Proxy generated and deployed successfully'
     };
     
