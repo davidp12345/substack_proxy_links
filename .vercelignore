@@ -1,0 +1,14 @@
+# Prevent deployment of files with spaces
+*" "*
+*" *.js"
+*" 2.*"
+
+# Ignore duplicate services API (use main /api instead)
+services/proxy-publisher/api/
+
+# Development files
+*.log
+*.tmp
+.DS_Store
+node_modules/
+.git/
