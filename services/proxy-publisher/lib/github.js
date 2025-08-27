@@ -17,10 +17,51 @@ export async function getInstallationOctokit(installationId) {
 
 export function normalizeFilename(urlStr) {
   const u = new URL(urlStr);
-  // For https://substack.com/home/post/p-170243747 → substack-com-home-post-p-170243747.html
+  
+  // Get hostname and replace dots with dashes  
   const host = u.hostname.replace(/\./g, '-');
-  const sanitized = u.pathname.replace(/\//g,'-').replace(/^-+|[^a-zA-Z0-9\-]/g,'');
-  return `${host}-${sanitized || 'home'}.html`;
+  
+  // Process pathname: replace slashes with dashes, remove leading dashes and unsafe chars
+  const pathPart = u.pathname
+    .replace(/\/+/g, '/')        // Normalize multiple slashes
+    .replace(/\//g, '-')         // Replace slashes with dashes
+    .replace(/^-+/, '')          // Remove leading dashes
+    .replace(/[^a-zA-Z0-9\-]/g, ''); // Remove unsafe characters
+  
+  // Process query parameters if they exist
+  let queryPart = '';
+  if (u.search && u.searchParams.size > 0) {
+    // Create a sorted list of key-value pairs for consistency
+    const params = Array.from(u.searchParams.entries())
+      .sort(([a], [b]) => a.localeCompare(b)) // Sort by key for deterministic output
+      .map(([key, value]) => `${key}-${value}`)
+      .join('-');
+    
+    if (params) {
+      queryPart = `-${params.replace(/[^a-zA-Z0-9\-]/g, '')}`; // Sanitize
+    }
+  }
+  
+  // Process hash fragment if it exists
+  let hashPart = '';
+  if (u.hash && u.hash.length > 1) { // u.hash includes the '#'
+    hashPart = `-${u.hash.slice(1).replace(/[^a-zA-Z0-9\-]/g, '')}`;
+  }
+  
+  // Combine all parts
+  const baseName = pathPart || 'home';
+  const fullName = `${host}-${baseName}${queryPart}${hashPart}`;
+  
+  // Ensure filename isn't too long (filesystem limits)
+  if (fullName.length > 200) {
+    // Create a hash of the query and hash parts to shorten while maintaining uniqueness
+    const crypto = await import('crypto');
+    const longParts = queryPart + hashPart;
+    const shortHash = crypto.createHash('md5').update(longParts).digest('hex').substring(0, 8);
+    return `${host}-${baseName}-${shortHash}.html`;
+  }
+  
+  return `${fullName}.html`;
 }
 
 export function buildHtml(target) {
