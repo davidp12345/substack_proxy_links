@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redirecting to Substack...</title>
+    
+    <!-- Primary redirect methods -->
+    <meta http-equiv="refresh" content="0; url=https://substack.com/home/post/p-169367889?source=queue">
+    <link rel="canonical" href="https://substack.com/home/post/p-169367889?source=queue">
+    
+    <!-- SEO and social media tags -->
+    <meta name="robots" content="noindex, nofollow">
+    <meta property="og:url" content="https://substack.com/home/post/p-169367889?source=queue">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="Substack Post">
+    <meta property="og:description" content="Click to read this Substack post">
+    <meta property="og:site_name" content="Substack">
+    
+    <!-- Twitter Card tags -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:url" content="https://substack.com/home/post/p-169367889?source=queue">
+    <meta name="twitter:title" content="Substack Post">
+    <meta name="twitter:description" content="Click to read this Substack post">
+    
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            color: #333;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .container {
+            text-align: center;
+            padding: 2.5rem;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            max-width: 450px;
+            width: 100%;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #ff6719;
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1.5rem;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        h2 {
+            margin: 0 0 1rem 0;
+            color: #ff6719;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        p {
+            margin: 1rem 0;
+            line-height: 1.6;
+            color: #666;
+        }
+        a {
+            color: #ff6719;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        a:hover {
+            text-decoration: underline;
+            color: #e55a15;
+        }
+        .url-display {
+            background: #f8f9fa;
+            padding: 0.75rem;
+            border-radius: 6px;
+            margin: 1rem 0;
+            word-break: break-all;
+            font-size: 0.9rem;
+            color: #666;
+            border-left: 3px solid #ff6719;
+        }
+        @media (max-width: 480px) {
+            .container {
+                padding: 1.5rem;
+                margin: 10px;
+            }
+            h2 {
+                font-size: 1.3rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="spinner"></div>
+        <h2>Redirecting to Substack...</h2>
+        <p>You're being redirected to your Substack post.</p>
+        <div class="url-display">https://substack.com/home/post/p-169367889?source=queue</div>
+        <p>If you're not redirected automatically, <a href="https://substack.com/home/post/p-169367889?source=queue" id="manual-link">click here</a>.</p>
+    </div>
+    
+    <script>
+        // Multiple fallback redirect methods for maximum compatibility
+        
+        // Immediate redirect attempt
+        try {
+            window.location.replace('https://substack.com/home/post/p-169367889?source=queue');
+        } catch (e) {
+            console.warn('location.replace failed:', e);
+        }
+        
+        // Backup redirect after short delay
+        setTimeout(function() {
+            try {
+                window.location.href = 'https://substack.com/home/post/p-169367889?source=queue';
+            } catch (e) {
+                console.warn('location.href failed:', e);
+                // Final fallback - focus the manual link
+                document.getElementById('manual-link').focus();
+            }
+        }, 100);
+        
+        // Handle cases where JavaScript is disabled but then enabled
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                if (window.location.href.indexOf('https://substack.com/home/post/p-169367889?source=queue') === -1) {
+                    window.location.href = 'https://substack.com/home/post/p-169367889?source=queue';
+                }
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

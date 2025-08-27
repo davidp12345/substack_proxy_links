@@ -94,71 +94,150 @@ async function generateViaVercel(url, apiBase){
 
 function normalizeUrlToFilename(url) {
   const u = new URL(url);
+  
+  // Get hostname and replace dots with dashes
   const host = u.hostname.replace(/\./g, '-');
-  const path = u.pathname.replace(/\//g, '-').replace(/^-+|[^a-zA-Z0-9\-]/g, '');
-  return `${host}-${path || 'home'}.html`;
+  
+  // Process pathname: replace slashes with dashes, remove leading dashes and unsafe chars
+  const pathPart = u.pathname
+    .replace(/\/+/g, '/')        // Normalize multiple slashes
+    .replace(/\//g, '-')         // Replace slashes with dashes
+    .replace(/^-+/, '')          // Remove leading dashes
+    .replace(/[^a-zA-Z0-9\-]/g, ''); // Remove unsafe characters
+  
+  // Process query parameters if they exist
+  let queryPart = '';
+  if (u.search && u.searchParams.size > 0) {
+    // Create a sorted list of key-value pairs for consistency
+    const params = Array.from(u.searchParams.entries())
+      .sort(([a], [b]) => a.localeCompare(b)) // Sort by key for deterministic output
+      .map(([key, value]) => `${key}-${value}`)
+      .join('-');
+    
+    if (params) {
+      queryPart = `-${params.replace(/[^a-zA-Z0-9\-]/g, '')}`; // Sanitize
+    }
+  }
+  
+  // Process hash fragment if it exists
+  let hashPart = '';
+  if (u.hash && u.hash.length > 1) { // u.hash includes the '#'
+    hashPart = `-${u.hash.slice(1).replace(/[^a-zA-Z0-9\-]/g, '')}`;
+  }
+  
+  // Combine all parts
+  const baseName = pathPart || 'home';
+  const fullName = `${host}-${baseName}${queryPart}${hashPart}`;
+  
+  // Ensure filename isn't too long (filesystem limits)
+  if (fullName.length > 200) {
+    // Create a simple hash of the long parts to shorten while maintaining uniqueness
+    const longParts = queryPart + hashPart;
+    const shortHash = btoa(longParts).replace(/[^a-zA-Z0-9]/g, '').substring(0, 8);
+    return `${host}-${baseName}-${shortHash}.html`;
+  }
+  
+  return `${fullName}.html`;
 }
 
 function generateProxyHtml(originalUrl) {
+  // Escape the URL for safe HTML inclusion
+  const safeUrl = String(originalUrl)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Redirecting to Substack...</title>
-    <meta http-equiv="refresh" content="0; url=${originalUrl}">
-    <link rel="canonical" href="${originalUrl}">
     
-    <!-- Open Graph tags for better social sharing -->
-    <meta property="og:url" content="${originalUrl}">
+    <!-- Primary redirect methods -->
+    <meta http-equiv="refresh" content="0; url=${safeUrl}">
+    <link rel="canonical" href="${safeUrl}">
+    
+    <!-- SEO and social media tags -->
+    <meta name="robots" content="noindex, nofollow">
+    <meta property="og:url" content="${safeUrl}">
     <meta property="og:type" content="article">
     <meta property="og:title" content="Substack Post">
     <meta property="og:description" content="Click to read this Substack post">
+    <meta property="og:site_name" content="Substack">
     
     <!-- Twitter Card tags -->
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:url" content="${originalUrl}">
+    <meta name="twitter:url" content="${safeUrl}">
     <meta name="twitter:title" content="Substack Post">
     <meta name="twitter:description" content="Click to read this Substack post">
     
     <style>
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            min-height: 100vh;
             margin: 0;
-            background-color: #f8f9fa;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
             color: #333;
+            padding: 20px;
+            box-sizing: border-box;
         }
         .container {
             text-align: center;
-            padding: 2rem;
+            padding: 2.5rem;
             background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            max-width: 400px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            max-width: 450px;
+            width: 100%;
         }
         .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #ff6719;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #ff6719;
             border-radius: 50%;
-            width: 40px;
-            height: 40px;
+            width: 48px;
+            height: 48px;
             animation: spin 1s linear infinite;
-            margin: 0 auto 1rem;
+            margin: 0 auto 1.5rem;
         }
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+        h2 {
+            margin: 0 0 1rem 0;
+            color: #ff6719;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        p {
+            margin: 1rem 0;
+            line-height: 1.6;
+            color: #666;
+        }
         a {
             color: #ff6719;
             text-decoration: none;
+            font-weight: 500;
+            transition: all 0.2s ease;
         }
         a:hover {
             text-decoration: underline;
+            color: #e55a15;
+        }
+        @media (max-width: 480px) {
+            .container {
+                padding: 1.5rem;
+                margin: 10px;
+            }
+            h2 {
+                font-size: 1.3rem;
+            }
         }
     </style>
 </head>
@@ -166,14 +245,40 @@ function generateProxyHtml(originalUrl) {
     <div class="container">
         <div class="spinner"></div>
         <h2>Redirecting to Substack...</h2>
-        <p>If you're not redirected automatically, <a href="${originalUrl}">click here</a>.</p>
+        <p>You're being redirected to your Substack post.</p>
+        <p>If you're not redirected automatically, <a href="${safeUrl}" id="manual-link">click here</a>.</p>
     </div>
     
     <script>
-        // Fallback redirect in case meta refresh doesn't work
+        // Multiple fallback redirect methods for maximum compatibility
+        
+        // Immediate redirect attempt
+        try {
+            window.location.replace('${originalUrl}');
+        } catch (e) {
+            console.warn('location.replace failed:', e);
+        }
+        
+        // Backup redirect after short delay
         setTimeout(function() {
-            window.location.href = '${originalUrl}';
+            try {
+                window.location.href = '${originalUrl}';
+            } catch (e) {
+                console.warn('location.href failed:', e);
+                // Final fallback - focus the manual link
+                var link = document.getElementById('manual-link');
+                if (link) link.focus();
+            }
         }, 100);
+        
+        // Handle cases where JavaScript is disabled but then enabled
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                if (window.location.href.indexOf('${originalUrl}') === -1) {
+                    window.location.href = '${originalUrl}';
+                }
+            }, 1000);
+        });
     </script>
 </body>
 </html>`;
