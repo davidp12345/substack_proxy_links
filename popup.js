@@ -1,4 +1,4 @@
-// popup.js
+// popup.js - Fixed version with robust URL handling and error recovery
 const NOTE_COMPOSE_PATH = '/home';
 const NOTE_PREFILL_PARAM = 'message';
 // Default proxy host base (used if no custom base saved in chrome.storage.sync)
@@ -30,13 +30,64 @@ class UnifiedPopup {
         this.generateCandidates();
       }
 
-      // Prefill proxy input from current tab if it looks like a Substack post
+      // Enhanced proxy input handling with URL cleaning
       const proxyInput = document.getElementById('proxy-input');
-      if (isSubstackPost) proxyInput.value = tab.url;
+      if (isSubstackPost) {
+        // Clean the URL before setting it
+        proxyInput.value = this.cleanUrl(tab.url);
+      }
+      
       document.getElementById('proxy-copy-url').addEventListener('click', () => this.generateAndCopyProxy());
+      
+      // Add input event listener to clean URLs as they're pasted
+      proxyInput.addEventListener('input', (e) => {
+        const cleaned = this.cleanUrl(e.target.value);
+        if (cleaned !== e.target.value) {
+          e.target.value = cleaned;
+        }
+      });
+      
     } catch (err) {
       console.error('Popup init failed', err);
       this.showError('Extension initialization failed');
+    }
+  }
+  
+  // Enhanced URL cleaning to handle various edge cases
+  cleanUrl(url) {
+    if (!url || typeof url !== 'string') return '';
+    
+    // Remove common prefixes that might be accidentally included
+    let cleaned = url.trim()
+      .replace(/^@+/, '')           // Remove @ symbols at start
+      .replace(/^#+/, '')           // Remove # symbols at start  
+      .replace(/^mailto:/, '')      // Remove mailto: prefix
+      .replace(/^javascript:/, '')  // Remove javascript: prefix
+      .replace(/^['"]+/, '')        // Remove leading quotes
+      .replace(/['"]+$/, '');       // Remove trailing quotes
+    
+    // If it doesn't start with http, try to fix it
+    if (cleaned && !cleaned.match(/^https?:\/\//)) {
+      // If it looks like a domain, add https://
+      if (cleaned.match(/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)) {
+        cleaned = 'https://' + cleaned;
+      }
+    }
+    
+    return cleaned;
+  }
+  
+  // Enhanced URL validation
+  isValidSubstackUrl(url) {
+    try {
+      const cleaned = this.cleanUrl(url);
+      if (!cleaned) return false;
+      
+      const u = new URL(cleaned);
+      return (u.hostname.endsWith('.substack.com') || u.hostname === 'substack.com') && 
+             u.protocol === 'https:';
+    } catch {
+      return false;
     }
   }
 
@@ -54,7 +105,13 @@ class UnifiedPopup {
             // Heuristic: presence of typical Substack DOM markers OR enough article text
             const titleSelectors = ['h1[class*="post-title"]','h1[class*="title"]','.post-header h1','article h1','h1'];
             let hasTitle = false;
-            for (const sel of titleSelectors) { const el = document.querySelector(sel); if (el?.textContent?.trim()) { hasTitle = true; break; } }
+            for (const sel of titleSelectors) { 
+              const el = document.querySelector(sel); 
+              if (el?.textContent?.trim()) { 
+                hasTitle = true; 
+                break; 
+              } 
+            }
 
             const contentSelectors = [
               '.markup p', '.post-content p', 'article p', '.pencraft p',
@@ -85,30 +142,28 @@ class UnifiedPopup {
       const url = new URL(tabUrl);
       return /(^|\/)p\//.test(url.pathname) || url.pathname.includes('/home/post/') || url.hostname.endsWith('.substack.com') || url.hostname === 'substack.com';
     } catch {
-      try { const u = new URL(tabUrl); return /(^|\/)p\//.test(u.pathname) || u.pathname.includes('/home/post/') || u.hostname.endsWith('.substack.com') || u.hostname === 'substack.com'; } catch { return false; }
+      try { 
+        const u = new URL(tabUrl); 
+        return /(^|\/)p\//.test(u.pathname) || u.pathname.includes('/home/post/') || u.hostname.endsWith('.substack.com') || u.hostname === 'substack.com'; 
+      } catch { 
+        return false; 
+      }
     }
   }
 
   async loadToggles() {
     const { enabledSources } = await chrome.storage.sync.get(['enabledSources']);
-    this.enabledSources = {
-      substack: enabledSources?.substack !== false,
-      linkedin: enabledSources?.linkedin !== false,
-      x: enabledSources?.x !== false
-    };
-    document.getElementById('toggle-substack').checked = this.enabledSources.substack;
-    document.getElementById('toggle-linkedin').checked = this.enabledSources.linkedin;
-    document.getElementById('toggle-x').checked = this.enabledSources.x;
+    if (enabledSources) Object.assign(this.enabledSources, enabledSources);
+
+    ['substack', 'linkedin', 'x'].forEach(source => {
+      const checkbox = document.getElementById(`toggle-${source}`);
+      if (checkbox) checkbox.checked = !!this.enabledSources[source];
+    });
   }
 
   bindToggleHandlers() {
-    const save = async () => { await chrome.storage.sync.set({ enabledSources: this.enabledSources }); };
-    document.getElementById('toggle-substack').addEventListener('change', async (e) => {
-      this.enabledSources.substack = !!e.target.checked; await save();
-      const tab = await this.getCurrentTab();
-      const isSubstackPost = await this.detectSubstackPost(tab.id, tab.url);
-      document.getElementById('generate-btn').disabled = !(this.enabledSources.substack && isSubstackPost);
-    });
+    const save = () => chrome.storage.sync.set({ enabledSources: this.enabledSources });
+    document.getElementById('toggle-substack').addEventListener('change', (e) => { this.enabledSources.substack = !!e.target.checked; save(); });
     document.getElementById('toggle-linkedin').addEventListener('change', (e) => { this.enabledSources.linkedin = !!e.target.checked; save(); });
     document.getElementById('toggle-x').addEventListener('change', (e) => { this.enabledSources.x = !!e.target.checked; save(); });
   }
@@ -120,63 +175,151 @@ class UnifiedPopup {
     const progressBox = document.getElementById('proxy-progress');
     const progressText = document.getElementById('proxy-progress-text');
     const progressFill = document.getElementById('proxy-progress-fill');
-    const raw = document.getElementById('proxy-input').value.trim();
-    if (!raw) { status.textContent = 'Paste a Substack URL'; return; }
-    let u; try { u = new URL(raw); } catch { status.textContent = 'Invalid URL'; return; }
-    if (!(u.hostname.endsWith('substack.com') || u.hostname === 'substack.com')) { status.textContent = 'Not a Substack URL'; return; }
+    
+    // Enhanced input processing
+    const rawInput = document.getElementById('proxy-input').value.trim();
+    if (!rawInput) { 
+      status.textContent = 'Paste a Substack URL'; 
+      return; 
+    }
+    
+    // Clean and validate the URL
+    const cleanedUrl = this.cleanUrl(rawInput);
+    if (!cleanedUrl) {
+      status.textContent = 'Invalid URL format';
+      return;
+    }
+    
+    // Additional validation
+    if (!this.isValidSubstackUrl(cleanedUrl)) {
+      status.textContent = 'Not a valid Substack URL';
+      return;
+    }
+    
+    let u;
+    try { 
+      u = new URL(cleanedUrl); 
+    } catch { 
+      status.textContent = 'Invalid URL format'; 
+      return; 
+    }
+    
+    console.log('🔗 Generating proxy for cleaned URL:', cleanedUrl);
+    
     status.textContent = 'Generating…';
     progressBox.style.display = 'block';
     progressText.textContent = 'Generating…';
     progressFill.style.width = '10%';
-    try{
-      const res = await chrome.runtime.sendMessage({ type:'proxy:generate', url: u.toString() });
-      if (!res || !res.ok){
-        try { await navigator.clipboard.writeText(u.toString()); status.textContent = 'Copied original URL (proxy failed)'; }
-        catch { status.textContent = res?.error || 'Generation failed'; }
+    
+    try {
+      // Use the cleaned URL for generation
+      const res = await chrome.runtime.sendMessage({ 
+        type: 'proxy:generate', 
+        url: cleanedUrl 
+      });
+      
+      console.log('📨 Background response:', res);
+      
+      if (!res || !res.ok) {
+        const errorMsg = res?.error || 'Generation failed';
+        console.error('❌ Proxy generation failed:', errorMsg);
+        
+        try { 
+          await navigator.clipboard.writeText(cleanedUrl); 
+          status.textContent = 'Copied original URL (proxy failed)'; 
+        } catch { 
+          status.textContent = errorMsg; 
+        }
         progressBox.style.display = 'none';
         return;
       }
+      
+      // Success! Update UI with links
       const links = document.getElementById('proxy-output-links');
       links.textContent = '';
+      
       const pages = res.pages_url || '';
       const fallback = res.fallback_url || '';
-      // Show both links so the user can click the one that already works
+      
+      console.log('✅ Proxy generated:', { pages, fallback, ready: res.ready });
+      
+      // Show both links so the user can choose
       if (pages) {
-        const a = document.createElement('a'); a.href = pages; a.textContent = 'Open static Pages link'; a.target='_blank';
-        links.appendChild(a); links.appendChild(document.createElement('br'));
+        const a = document.createElement('a'); 
+        a.href = pages; 
+        a.textContent = res.ready ? 'Open static Pages link' : 'Future Pages link (needs deployment)'; 
+        a.target = '_blank';
+        links.appendChild(a); 
+        links.appendChild(document.createElement('br'));
       }
-      if (fallback && fallback !== pages){
-        const b = document.createElement('a'); b.href = fallback; b.textContent = 'Open fallback (works immediately)'; b.target='_blank';
+      
+      if (fallback && fallback !== pages) {
+        const b = document.createElement('a'); 
+        b.href = fallback; 
+        b.textContent = fallback.startsWith('data:') ? 'Open redirect page (works immediately)' : 'Open fallback link'; 
+        b.target = '_blank';
         links.appendChild(b);
       }
-      // Copy whichever is immediately ready — background already waited; if not ready, copy fallback
-      // Poll readiness up to ~30s; update UI progress and messages
-      let ready = !!res.ready;
-      const toCheck = pages || fallback;
-      const start = Date.now();
-      const timeoutMs = 30000; const stepMs = 1500;
-      let attempt = 0;
-      while(!ready && (Date.now() - start) < timeoutMs){
-        attempt++;
-        const pct = Math.min(90, Math.round(((Date.now()-start)/timeoutMs)*100));
-        progressFill.style.width = pct + '%';
-        progressText.textContent = 'Publishing to Pages… (' + pct + '%)';
-        try{
-          const r = await fetch(toCheck, { method:'HEAD', cache:'no-store' });
-          ready = r.status === 200;
-        }catch{ ready = false; }
-        if (!ready) await new Promise(r=>setTimeout(r, stepMs));
+      
+      // Determine what to copy based on what's ready
+      let copyThis = '';
+      let statusMsg = '';
+      
+      if (res.ready && pages) {
+        // Pages URL is ready
+        copyThis = pages;
+        statusMsg = 'Ready ✔ (Pages URL copied)';
+        progressFill.style.width = '100%';
+        progressText.textContent = 'Live on Pages';
+      } else if (fallback) {
+        // Use fallback URL
+        copyThis = fallback;
+        if (fallback.startsWith('data:')) {
+          statusMsg = 'Redirect URL copied (works immediately)';
+          progressText.textContent = 'Redirect ready';
+        } else {
+          statusMsg = 'Fallback URL copied';
+          progressText.textContent = 'Using fallback';
+        }
+        progressFill.style.width = '100%';
+      } else if (pages) {
+        // Future Pages URL
+        copyThis = pages;
+        statusMsg = 'Pages URL copied (needs deployment)';
+        progressFill.style.width = '70%';
+        progressText.textContent = 'Needs deployment';
+      } else {
+        // Fallback to original
+        copyThis = cleanedUrl;
+        statusMsg = 'Original URL copied';
+        progressFill.style.width = '100%';
+        progressText.textContent = 'Fallback to original';
       }
-
-      const copyThis = ready ? pages : (fallback || pages);
-      if (copyThis) await navigator.clipboard.writeText(copyThis);
-      status.textContent = ready ? 'Ready ✔ (URL copied)' : 'Publishing… fallback copied';
-      progressFill.style.width = '100%';
-      progressText.textContent = ready ? 'Live on Pages' : 'Using fallback link';
-      setTimeout(()=>{ progressBox.style.display = 'none'; }, 600);
-    }catch(e){
-      try { await navigator.clipboard.writeText(u.toString()); status.textContent = 'Copied original URL (proxy failed)'; }
-      catch { status.textContent = 'Generation failed'; }
+      
+      // Copy to clipboard
+      if (copyThis) {
+        try {
+          await navigator.clipboard.writeText(copyThis);
+          status.textContent = statusMsg;
+        } catch (clipboardError) {
+          console.error('Clipboard error:', clipboardError);
+          status.textContent = 'Generated (manual copy needed)';
+        }
+      }
+      
+      // Auto-hide progress after a delay
+      setTimeout(() => {
+        progressBox.style.display = 'none';
+      }, 2000);
+      
+    } catch (e) {
+      console.error('❌ Error in generateAndCopyProxy:', e);
+      try { 
+        await navigator.clipboard.writeText(cleanedUrl); 
+        status.textContent = 'Copied original URL (proxy failed)'; 
+      } catch { 
+        status.textContent = 'Generation failed'; 
+      }
       progressBox.style.display = 'none';
     }
   }
@@ -188,11 +331,28 @@ class UnifiedPopup {
       const postData = await this.extractPostContent(tab.id);
       if (!postData.content || postData.content.length < 100) throw new Error('Insufficient content');
       if (!postData.title) throw new Error('Missing title');
-      this.candidates = this.generateSimpleCandidates(postData);
+
+      this.candidates = [];
+      
+      if (this.enabledSources.substack) {
+        const substackNote = this.generateSubstackNote(postData);
+        this.candidates.push({ type: 'Substack', platform: 'substack', data: substackNote });
+      }
+
+      if (this.enabledSources.linkedin) {
+        const linkedinPost = this.generateLinkedInPost(postData);
+        this.candidates.push({ type: 'LinkedIn', platform: 'linkedin', data: linkedinPost });
+      }
+
+      if (this.enabledSources.x) {
+        const xPost = this.generateXPost(postData);
+        this.candidates.push({ type: 'X (Twitter)', platform: 'x', data: xPost });
+      }
+
       this.displayCandidates();
-    } catch (error) {
-      console.error('Error generating candidates:', error);
-      this.showError(`Failed: ${error.message}`);
+    } catch (err) {
+      console.error('Error generating candidates:', err);
+      this.showError('Failed to extract content from the page');
     }
   }
 
@@ -201,184 +361,160 @@ class UnifiedPopup {
       target: { tabId },
       world: 'MAIN',
       function: () => {
-        let title = '';
-        let content = '';
-        let cleanParagraphs = [];
         const titleSelectors = ['h1[class*="post-title"]','h1[class*="title"]','.post-header h1','article h1','h1'];
-        for (const sel of titleSelectors) { const el = document.querySelector(sel); if (el?.textContent?.trim()) { title = el.textContent.trim(); break; } }
-        const contentSelectors = ['.markup p', '.post-content p', 'article p', '.pencraft p', 'main article p', '[data-testid="post-content"] p', '[data-testid="post-body"] p', '.reader .pencraft p'];
-        let found = [];
-        for (const sel of contentSelectors) { const nodes = document.querySelectorAll(sel); if (nodes.length > 0) { found = Array.from(nodes); break; } }
-        found.forEach(p => { const t = p.textContent?.trim(); if (t && t.length > 50 && !/Share this post|Copy link|Subscribe|Leave a comment/.test(t) && t.length < 1000) { cleanParagraphs.push(t); } });
-        content = cleanParagraphs.join('\n\n');
-        if (!content || content.length < 100) { const allText = document.body.textContent || ''; const sentences = allText.split(/[.!?]+/).filter(s => s.trim().length > 30 && !/Share this post|Copy link|Subscribe/.test(s)); content = sentences.slice(0, 5).join('. ').trim(); }
-        return { title, content, paragraphs: cleanParagraphs, url: window.location.href };
+        let title = '';
+        for (const sel of titleSelectors) { 
+          const el = document.querySelector(sel); 
+          if (el?.textContent?.trim()) { 
+            title = el.textContent.trim(); 
+            break; 
+          } 
+        }
+
+        const contentSelectors = [
+          '.markup p', '.post-content p', 'article p', '.pencraft p',
+          'main article p', '[data-testid="post-content"] p', '[data-testid="post-body"] p',
+          '.reader .pencraft p'
+        ];
+        let content = '';
+        for (const sel of contentSelectors) {
+          const nodes = document.querySelectorAll(sel);
+          if (nodes.length > 0) {
+            content = Array.from(nodes).map(n => (n.textContent||'').trim()).filter(t => t.length > 10).join('\n\n');
+            break;
+          }
+        }
+
+        const authorSelectors = ['.byline a', '.author-name', '.pencraft[data-testid="author-name"]', '.author'];
+        let author = '';
+        for (const sel of authorSelectors) {
+          const el = document.querySelector(sel);
+          if (el?.textContent?.trim()) { 
+            author = el.textContent.trim(); 
+            break; 
+          }
+        }
+
+        return { title, content, author, url: location.href };
       }
     });
     return result;
   }
 
-  generateSimpleCandidates(postData) {
-    const candidates = [];
-    if (!postData.paragraphs || postData.paragraphs.length === 0) throw new Error('No clean content found');
+  generateSubstackNote(postData) {
+    const noteText = `${postData.title}\n\n${postData.content.substring(0, 800)}${postData.content.length > 800 ? '...' : ''}\n\nSource: ${postData.url}`;
+    return { noteText, targetUrl: postData.url };
+  }
 
-    const sanitize = (t) => (t || '')
-      .trim()
-      .replace(/^from\s+\"[^\"]+\"\s*:\s*/i, '')
-      .replace(/^note\s*:\s*/i, '')
-      .replace(/\s+/g, ' ')
-      .trim();
+  generateLinkedInPost(postData) {
+    const maxLength = 3000;
+    let post = `${postData.title}\n\n${postData.content}`;
+    if (post.length > maxLength) post = post.substring(0, maxLength - 100) + '...';
+    post += `\n\nRead the full post: ${postData.url}`;
+    return { post, targetUrl: postData.url };
+  }
 
-    const splitSentences = (text) => {
-      const s = (text || '').trim();
-      const parts = s.split(/(?<=[.!?])\s+/g).map(x => x.trim()).filter(Boolean);
-      return parts;
-    };
-
-    const minLen = 200;
-    const maxLen = 800;
-
-    const buildSelfContained = (raw) => {
-      let text = sanitize(raw || '');
-      text = text.replace(/^(["“])+/, '').replace(/(["”])+$/, '');
-      const sentences = splitSentences(text);
-      if (sentences.length === 0) return '';
-
-      let acc = '';
-      for (let i = 0; i < sentences.length; i++) {
-        const candidate = (acc ? acc + ' ' : '') + sentences[i];
-        if (candidate.length <= maxLen) {
-          acc = candidate;
-          if (acc.length >= minLen && /[.!?]$/.test(acc)) {
-            const next = sentences[i + 1];
-            if (!next || (acc + ' ' + next).length > maxLen) break;
-          }
-        } else {
-          if (!acc) {
-            const slice = sentences[i].slice(0, maxLen);
-            const lastBoundary = Math.max(
-              slice.lastIndexOf('. '),
-              slice.lastIndexOf('! '),
-              slice.lastIndexOf('? '),
-              slice.lastIndexOf('.'),
-              slice.lastIndexOf('!'),
-              slice.lastIndexOf('?')
-            );
-            acc = lastBoundary > 120 ? slice.slice(0, lastBoundary + 1).trim() : slice.trim();
-          }
-          break;
-        }
-      }
-      acc = acc.replace(/[\u2026]+$/g, '').replace(/\s*(?:\.\.\.)\s*$/g, '');
-      if (!/[.!?]$/.test(acc)) acc = acc.replace(/[\s,;:]+$/,'').trim() + '.';
-      return acc;
-    };
-
-    const createCandidate = (type, content, score) => {
-      const full = buildSelfContained(content);
-      if (full && full.length >= 180 && full.length <= maxLen) return { type, content: full, engagementScore: score };
-      return null;
-    };
-
-    const paragraphs = postData.paragraphs.map(sanitize).filter(p => p.length > 30);
-    const allSentences = splitSentences(paragraphs.join(' ')).map(sanitize).filter(s => s.length > 15 && s.length < 500);
-
-    // Build additional sources: chunk overly long paragraphs by sentence windows
-    const chunkedParagraphs = [];
-    for (const p of paragraphs) {
-      if (p.length <= maxLen) continue;
-      const sents = splitSentences(p);
-      for (let size = 2; size <= 5; size++) {
-        for (let i = 0; i <= sents.length - size; i++) {
-          const chunk = sents.slice(i, i + size).join(' ');
-          if (chunk.length >= 140 && chunk.length <= 1000) chunkedParagraphs.push(chunk);
-        }
-      }
+  generateXPost(postData) {
+    const maxLength = 280;
+    let tweet = `${postData.title}\n\n${postData.url}`;
+    if (tweet.length > maxLength) {
+      const availableForTitle = maxLength - postData.url.length - 5;
+      tweet = `${postData.title.substring(0, availableForTitle)}...\n\n${postData.url}`;
     }
-
-    // Sliding windows over all sentences (2–4 sentences) to increase variety
-    const sentenceWindows = [];
-    for (let size = 2; size <= 4; size++) {
-      for (let i = 0; i <= allSentences.length - size; i++) {
-        const windowText = allSentences.slice(i, i + size).join(' ');
-        if (windowText.length >= 140 && windowText.length <= 1000) sentenceWindows.push(windowText);
-      }
-    }
-
-    // Prioritization: strong paragraphs, chunked paragraphs, then sentence windows
-    const contentPieces = [
-      ...paragraphs,
-      ...chunkedParagraphs,
-      ...sentenceWindows
-    ];
-
-    const normalize = (t) => sanitize(t).toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
-    const seen = new Set(); const leadSeen = new Set();
-
-    for (let i = 0, outIdx = 0; i < contentPieces.length && candidates.length < 10; i++) {
-      const base = contentPieces[i];
-      const built = buildSelfContained(base);
-      if (!built) continue;
-      const leadKey = normalize(built.slice(0, 100));
-      if (leadSeen.has(leadKey)) continue;
-      const norm = normalize(built);
-      if (seen.has(norm)) continue;
-
-      const cand = createCandidate(`note${outIdx + 1}`, built, 95 - outIdx * 3);
-      if (cand) { candidates.push(cand); seen.add(norm); leadSeen.add(leadKey); outIdx++; }
-    }
-
-    if (candidates.length === 0 && allSentences.length > 0) {
-      for (let i = 0; i < Math.min(5, allSentences.length - 1); i++) {
-        const simple = buildSelfContained(allSentences[i] + ' ' + (allSentences[i + 1] || ''));
-        if (!simple) continue;
-        const cand = { type: `fallback${i + 1}`, content: simple, engagementScore: 50 - i * 5 };
-        candidates.push(cand);
-        if (candidates.length >= 10) break;
-      }
-    }
-
-    if (candidates.length === 0) throw new Error('Could not create any candidates');
-    return candidates.slice(0, 10).map((c, idx) => ({ ...c, type: `note${idx + 1}` }));
+    return { tweet, targetUrl: postData.url };
   }
 
   displayCandidates() {
-    const container = document.getElementById('candidates');
-    container.innerHTML = '';
-    this.candidates.forEach((c, index) => {
-      const div = document.createElement('div');
-      div.className = 'candidate-item';
-      div.innerHTML = `
+    const container = document.getElementById('candidates-container');
+    if (this.candidates.length === 0) {
+      container.innerHTML = '<p class="error">No candidates generated. Check your source toggles.</p>';
+      return;
+    }
+
+    container.innerHTML = this.candidates.map((candidate, index) => `
+      <div class="candidate-item">
         <div class="candidate-header">
-          <span class="candidate-type">${c.type.toUpperCase()}</span>
-          <span class="candidate-score">Score: ${c.engagementScore}</span>
+          <span class="candidate-type">${candidate.type}</span>
         </div>
-        <div class="candidate-content">${this.formatContent(c.content, this.expandedCandidates.has(index))}</div>
+        <div class="candidate-content ${this.expandedCandidates.has(index) ? 'expanded' : 'collapsed'}">
+          ${this.formatCandidateData(candidate.data)}
+        </div>
         <div class="candidate-actions">
-          <button class="see-more-btn" data-index="${index}">${this.expandedCandidates.has(index) ? 'See less' : 'See more'}</button>
-          <button class="edit-btn" data-index="${index}">Edit in Notes</button>
-        </div>`;
-      container.appendChild(div);
-    });
-    container.querySelectorAll('.edit-btn').forEach(btn => btn.addEventListener('click', e => { const index = parseInt(e.target.dataset.index, 10); this.openInNotesEditor(index); }));
-    container.querySelectorAll('.see-more-btn').forEach(btn => btn.addEventListener('click', e => { const index = parseInt(e.target.dataset.index, 10); if (this.expandedCandidates.has(index)) this.expandedCandidates.delete(index); else this.expandedCandidates.add(index); this.displayCandidates(); }));
-    this.showCandidates();
+          <button class="see-more-btn" onclick="popup.toggleExpanded(${index})">
+            ${this.expandedCandidates.has(index) ? 'Show Less' : 'See More'}
+          </button>
+          <button class="edit-btn" onclick="popup.editCandidate('${candidate.platform}', ${index})">Edit in ${candidate.type}</button>
+        </div>
+      </div>
+    `).join('');
   }
 
-  async openInNotesEditor(idx) { const candidate = this.candidates[idx]; await this.openNoteEditorWithText(candidate.content); window.close(); }
-
-  async openNoteEditorWithText(noteText) {
-    await chrome.storage.local.set({ pendingNoteText: noteText, pendingNoteTs: Date.now(), pendingNoteToken: `${Date.now()}-${Math.random().toString(36).slice(2,10)}` });
-    const params = new URLSearchParams(); params.set('action', 'compose'); params.set(NOTE_PREFILL_PARAM, noteText);
-    const composeUrl = `https://substack.com${NOTE_COMPOSE_PATH}?${params.toString()}`;
-    await chrome.tabs.create({ url: composeUrl });
+  formatCandidateData(data) {
+    if (data.noteText) return `<p>${this.escapeHtml(data.noteText)}</p>`;
+    if (data.post) return `<p>${this.escapeHtml(data.post)}</p>`;
+    if (data.tweet) return `<p>${this.escapeHtml(data.tweet)}</p>`;
+    return '<p>No content</p>';
   }
 
-  formatContent(content, expanded = false) { const text = expanded ? content : (content.length > 150 ? content.substring(0, 150) + '...' : content); return text.replace(/\n/g, '<br>'); }
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
 
-  showLoading() { document.getElementById('generate-section').classList.add('hidden'); document.getElementById('candidates').classList.add('hidden'); document.getElementById('error').classList.add('hidden'); document.getElementById('loading').classList.remove('hidden'); }
-  showCandidates() { document.getElementById('loading').classList.add('hidden'); document.getElementById('error').classList.add('hidden'); document.getElementById('generate-section').classList.add('hidden'); document.getElementById('candidates').classList.remove('hidden'); }
-  showError(message) { document.getElementById('loading').classList.add('hidden'); document.getElementById('candidates').classList.add('hidden'); document.getElementById('error').classList.remove('hidden'); document.getElementById('error-message').textContent = message; }
+  toggleExpanded(index) {
+    if (this.expandedCandidates.has(index)) {
+      this.expandedCandidates.delete(index);
+    } else {
+      this.expandedCandidates.add(index);
+    }
+    this.displayCandidates();
+  }
+
+  async editCandidate(platform, index) {
+    const candidate = this.candidates[index];
+    if (!candidate) return;
+
+    try {
+      let targetUrl = '';
+      let prefillContent = '';
+
+      if (platform === 'substack') {
+        const noteText = candidate.data.noteText || '';
+        const params = new URLSearchParams(); 
+        params.set('action', 'compose'); 
+        params.set(NOTE_PREFILL_PARAM, noteText);
+        targetUrl = `https://substack.com${NOTE_COMPOSE_PATH}?${params.toString()}`;
+      } else if (platform === 'linkedin') {
+        const text = candidate.data.post || '';
+        prefillContent = encodeURIComponent(text);
+        targetUrl = `https://www.linkedin.com/feed/?shareActive=true&text=${prefillContent}`;
+      } else if (platform === 'x') {
+        const text = candidate.data.tweet || '';
+        prefillContent = encodeURIComponent(text);
+        targetUrl = `https://x.com/intent/tweet?text=${prefillContent}`;
+      }
+
+      if (targetUrl) {
+        await chrome.tabs.create({ url: targetUrl });
+      }
+    } catch (err) {
+      console.error(`Error opening ${platform}:`, err);
+      this.showError(`Failed to open ${platform}`);
+    }
+  }
+
+  showLoading() {
+    document.getElementById('candidates-container').innerHTML = '<div class="loading">Generating candidates...</div>';
+  }
+
+  showError(message) {
+    document.getElementById('candidates-container').innerHTML = `<div class="error">${this.escapeHtml(message)}</div>`;
+  }
 }
 
-new UnifiedPopup();
+// Global instance for button handlers
+let popup;
+document.addEventListener('DOMContentLoaded', () => {
+  popup = new UnifiedPopup();
+});

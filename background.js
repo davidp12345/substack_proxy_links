@@ -1,145 +1,93 @@
 // background.js - Service worker for automatic proxy generation
+// Fixed version that works without native messaging dependencies
 
 const DEFAULT_PROXY_HOST_BASE = 'https://davidp12345.github.io/substack_proxy_links/proxies';
 
-// Listen for messages from content scripts
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request && request.action === 'generateProxy') {
-    handleProxyGeneration(request.url, sendResponse);
-    return true; // Keep the message channel open for async response
-  }
-  // Accept popup-style message: { type: 'proxy:generate', url }
-  if (request && request.type === 'proxy:generate' && request.url) {
-    handleProxyGeneration(request.url, (resp) => {
-      if (resp && resp.success) {
-        sendResponse({ ok: true, pages_url: resp.proxyUrl, fallback_url: resp.proxyUrl, ready: false, slug: resp.filename });
-      } else {
-        sendResponse({ ok: false, error: resp?.error || 'Proxy generation failed' });
-      }
-    });
-    return true;
-  }
-});
-
-async function handleProxyGeneration(url, sendResponse) {
-  try {
-    console.log('🚀 Starting automatic proxy generation for:', url);
-    
-    // Validate URL
-    const urlObj = new URL(url);
-    if (!(urlObj.hostname.endsWith('substack.com') || urlObj.hostname === 'substack.com')) {
-      throw new Error('Not a Substack URL');
-    }
-    
-    // If Vercel API is configured, prefer it; otherwise fall back to native host
-    const { vercelApiBase } = await chrome.storage.sync.get(['vercelApiBase']);
-    const apiBase = typeof vercelApiBase === 'string' ? vercelApiBase.trim().replace(/\/$/, '') : '';
-
-    if (apiBase) {
-      const viaVercel = await generateViaVercel(url, apiBase);
-      if (viaVercel && viaVercel.ok) {
-        sendResponse({ ok:true, pages_url: viaVercel.pages_url, fallback_url: viaVercel.fallback_url, ready: viaVercel.ready, slug: viaVercel.slug });
-        return;
-      }
-      console.warn('Vercel generation failed, falling back to native host', viaVercel?.error || viaVercel);
-    }
-
-    // Native-host fallback
-    const filename = normalizeUrlToFilename(url);
-    const htmlContent = generateProxyHtml(url);
-    const success = await generateAndDeployProxy(url, filename, htmlContent);
-    if (success) {
-      const { proxyHostBase } = await chrome.storage.sync.get(['proxyHostBase']);
-      const base = (typeof proxyHostBase === 'string' && proxyHostBase.trim().length) ? proxyHostBase.trim() : DEFAULT_PROXY_HOST_BASE;
-      const proxyUrl = `${base.replace(/\/$/, '')}/${filename}`;
-      console.log('✅ Proxy generated and deployed (native):', proxyUrl);
-      sendResponse({ ok:true, pages_url: proxyUrl, fallback_url: proxyUrl, ready:false, slug: filename.replace(/\.html$/, '') });
-      return;
-    }
-    throw new Error('Failed to generate proxy via Vercel or native host');
-    
-  } catch (error) {
-    console.error('❌ Error generating proxy:', error);
-    sendResponse({ ok:false, error: error.message });
-  }
-}
-
-async function generateViaVercel(url, apiBase){
-  try{
-    const res = await fetch(`${apiBase}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url })
-    });
-    const data = await res.json().catch(()=>({}));
-    if (!data || data.ok !== true) {
-      return { ok:false, stage: data?.stage, error: data?.error || 'generate failed' };
-    }
-    // Poll readiness
-    let ready = false;
-    const maxAttempts = 15;
-    for (let i=0;i<maxAttempts;i++){
-      try{
-        const s = await fetch(`${apiBase}/api/status?pages_url=${encodeURIComponent(data.pages_url)}`);
-        const j = await s.json().catch(()=>({}));
-        if (j && j.ready) { ready = true; break; }
-      }catch{}
-      await new Promise(r=>setTimeout(r,2000));
-    }
-    return { ok:true, pages_url: data.pages_url, fallback_url: data.fallback_url, ready, slug: data.slug };
-  }catch(err){
-    return { ok:false, stage:'network', error: err.message };
-  }
-}
-
+// Enhanced URL normalization that handles query parameters properly
 function normalizeUrlToFilename(url) {
-  const u = new URL(url);
-  
-  // Get hostname and replace dots with dashes
-  const host = u.hostname.replace(/\./g, '-');
-  
-  // Process pathname: replace slashes with dashes, remove leading dashes and unsafe chars
-  const pathPart = u.pathname
-    .replace(/\/+/g, '/')        // Normalize multiple slashes
-    .replace(/\//g, '-')         // Replace slashes with dashes
-    .replace(/^-+/, '')          // Remove leading dashes
-    .replace(/[^a-zA-Z0-9\-]/g, ''); // Remove unsafe characters
-  
-  // Process query parameters if they exist
-  let queryPart = '';
-  if (u.search && u.searchParams.size > 0) {
-    // Create a sorted list of key-value pairs for consistency
-    const params = Array.from(u.searchParams.entries())
-      .sort(([a], [b]) => a.localeCompare(b)) // Sort by key for deterministic output
-      .map(([key, value]) => `${key}-${value}`)
-      .join('-');
+  try {
+    const u = new URL(url);
     
-    if (params) {
-      queryPart = `-${params.replace(/[^a-zA-Z0-9\-]/g, '')}`; // Sanitize
+    // Get hostname and replace dots with dashes
+    const host = u.hostname.replace(/\./g, '-');
+    
+    // Process pathname: replace slashes with dashes, remove leading dashes and unsafe chars
+    let pathPart = u.pathname
+      .replace(/\/+/g, '/')        // Normalize multiple slashes
+      .replace(/\/$/, '')          // Remove trailing slash
+      .replace(/\//g, '-')         // Replace slashes with dashes
+      .replace(/^-+/, '')          // Remove leading dashes
+      .replace(/[^a-zA-Z0-9\-]/g, ''); // Remove unsafe characters
+    
+    // Handle special cases where path variations should be treated the same
+    if (pathPart === '' || pathPart === 'home') {
+      pathPart = 'home';
     }
+    
+    // Process query parameters if they exist
+    let queryPart = '';
+    if (u.search && u.searchParams.size > 0) {
+      // Create a sorted list of key-value pairs for consistency
+      const params = Array.from(u.searchParams.entries())
+        .sort(([a], [b]) => a.localeCompare(b)) // Sort by key for deterministic output
+        .map(([key, value]) => `${key}-${value}`)
+        .join('-');
+      
+      if (params) {
+        queryPart = `-${params.replace(/[^a-zA-Z0-9\-]/g, '')}`; // Sanitize
+      }
+    }
+    
+    // Process hash fragment if it exists
+    let hashPart = '';
+    if (u.hash && u.hash.length > 1) { // u.hash includes the '#'
+      hashPart = `-${u.hash.slice(1).replace(/[^a-zA-Z0-9\-]/g, '')}`;
+    }
+    
+    // Combine all parts
+    const baseName = pathPart || 'home';
+    const fullName = `${host}-${baseName}${queryPart}${hashPart}`;
+    
+    // Ensure filename isn't too long (filesystem limits)
+    if (fullName.length > 200) {
+      // Create a simple hash of the long parts to shorten while maintaining uniqueness
+      const longParts = queryPart + hashPart;
+      const shortHash = btoa(longParts).replace(/[^a-zA-Z0-9]/g, '').substring(0, 8);
+      return `${host}-${baseName}-${shortHash}.html`;
+    }
+    
+    return `${fullName}.html`;
+  } catch (error) {
+    console.error('Error normalizing URL:', error);
+    // Fallback to a safe filename
+    return `proxy-${Date.now()}.html`;
   }
-  
-  // Process hash fragment if it exists
-  let hashPart = '';
-  if (u.hash && u.hash.length > 1) { // u.hash includes the '#'
-    hashPart = `-${u.hash.slice(1).replace(/[^a-zA-Z0-9\-]/g, '')}`;
-  }
-  
-  // Combine all parts
-  const baseName = pathPart || 'home';
-  const fullName = `${host}-${baseName}${queryPart}${hashPart}`;
-  
-  // Ensure filename isn't too long (filesystem limits)
-  if (fullName.length > 200) {
-    // Create a simple hash of the long parts to shorten while maintaining uniqueness
-    const longParts = queryPart + hashPart;
-    const shortHash = btoa(longParts).replace(/[^a-zA-Z0-9]/g, '').substring(0, 8);
-    return `${host}-${baseName}-${shortHash}.html`;
-  }
-  
-  return `${fullName}.html`;
 }
 
+// Enhanced URL validation
+function validateSubstackUrl(urlStr) {
+  try {
+    // Clean the URL first (remove potential @ prefix or other artifacts)
+    const cleanUrl = urlStr.trim().replace(/^@+/, '');
+    
+    const u = new URL(cleanUrl);
+    
+    // Must be HTTPS and Substack domain
+    if (u.protocol !== 'https:') {
+      return { isValid: false, error: 'Must use HTTPS protocol', cleanUrl };
+    }
+    
+    if (!(u.hostname.endsWith('.substack.com') || u.hostname === 'substack.com')) {
+      return { isValid: false, error: 'Not a Substack domain', cleanUrl };
+    }
+    
+    return { isValid: true, cleanUrl, url: u };
+  } catch (error) {
+    return { isValid: false, error: `Invalid URL: ${error.message}`, cleanUrl: urlStr };
+  }
+}
+
+// Generate enhanced proxy HTML with multiple fallback methods
 function generateProxyHtml(originalUrl) {
   // Escape the URL for safe HTML inclusion
   const safeUrl = String(originalUrl)
@@ -230,6 +178,16 @@ function generateProxyHtml(originalUrl) {
             text-decoration: underline;
             color: #e55a15;
         }
+        .url-display {
+            background: #f8f9fa;
+            padding: 0.75rem;
+            border-radius: 6px;
+            margin: 1rem 0;
+            word-break: break-all;
+            font-size: 0.9rem;
+            color: #666;
+            border-left: 3px solid #ff6719;
+        }
         @media (max-width: 480px) {
             .container {
                 padding: 1.5rem;
@@ -246,6 +204,7 @@ function generateProxyHtml(originalUrl) {
         <div class="spinner"></div>
         <h2>Redirecting to Substack...</h2>
         <p>You're being redirected to your Substack post.</p>
+        <div class="url-display">${safeUrl}</div>
         <p>If you're not redirected automatically, <a href="${safeUrl}" id="manual-link">click here</a>.</p>
     </div>
     
@@ -284,48 +243,140 @@ function generateProxyHtml(originalUrl) {
 </html>`;
 }
 
-async function generateAndDeployProxy(url, filename, htmlContent) {
+// Self-contained proxy generation using Vercel API or fallback URL
+async function generateProxyViaVercel(url, apiBase) {
   try {
-    // Use native messaging to communicate with the Node.js script
-    const response = await new Promise((resolve, reject) => {
-      chrome.runtime.sendNativeMessage('com.substack.proxy', {
-        action: 'generateProxy',
-        url: url
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else {
-          resolve(response);
-        }
-      });
+    const response = await fetch(`${apiBase}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url })
     });
     
-    if (response && response.success) {
-      console.log('✅ Native host response:', response);
-      return true;
-    } else {
-      throw new Error(response?.error || 'Native host failed');
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
+    
+    return await response.json();
   } catch (error) {
-    console.error('Error in generateAndDeployProxy:', error);
-    
-    // Fallback: store the proxy data for manual deployment
-    await chrome.storage.local.set({
-      [`pending_proxy_${Date.now()}`]: {
-        url: url,
-        filename: filename,
-        htmlContent: htmlContent,
-        timestamp: Date.now(),
-        error: error.message
-      }
-    });
-    
-    // Return false to indicate we need manual deployment
-    return false;
+    console.error('Vercel API error:', error);
+    return { ok: false, error: error.message };
   }
 }
 
-// Clean up old proxy data periodically
+// Enhanced message handling with proper error handling and response structure
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  console.log('📨 Background received message:', request);
+  
+  // Handle legacy format
+  if (request && request.action === 'generateProxy') {
+    handleProxyGeneration(request.url, sendResponse);
+    return true;
+  }
+  
+  // Handle popup format: { type: 'proxy:generate', url }
+  if (request && request.type === 'proxy:generate' && request.url) {
+    handleProxyGeneration(request.url, sendResponse);
+    return true;
+  }
+  
+  return false; // Let other handlers process the message
+});
+
+async function handleProxyGeneration(rawUrl, sendResponse) {
+  try {
+    console.log('🚀 Starting proxy generation for:', rawUrl);
+    
+    // Enhanced URL validation and cleaning
+    const validation = validateSubstackUrl(rawUrl);
+    if (!validation.isValid) {
+      console.error('❌ URL validation failed:', validation.error);
+      sendResponse({ 
+        ok: false, 
+        error: validation.error,
+        stage: 'validation'
+      });
+      return;
+    }
+    
+    const cleanUrl = validation.cleanUrl;
+    const urlObj = validation.url;
+    
+    console.log('✅ URL validated:', cleanUrl);
+    
+    // Try Vercel API first if configured
+    const { vercelApiBase } = await chrome.storage.sync.get(['vercelApiBase']);
+    const apiBase = typeof vercelApiBase === 'string' ? vercelApiBase.trim().replace(/\/$/, '') : '';
+    
+    if (apiBase) {
+      console.log('🔄 Trying Vercel API...');
+      const vercelResult = await generateProxyViaVercel(cleanUrl, apiBase);
+      
+      if (vercelResult && vercelResult.ok) {
+        console.log('✅ Vercel API succeeded');
+        sendResponse({
+          ok: true,
+          pages_url: vercelResult.pages_url,
+          fallback_url: vercelResult.fallback_url,
+          ready: vercelResult.ready || false,
+          slug: vercelResult.slug,
+          stage: 'vercel'
+        });
+        return;
+      } else {
+        console.warn('⚠️ Vercel API failed:', vercelResult?.error);
+      }
+    }
+    
+    // Self-contained fallback - generate immediate redirect URL
+    console.log('🔄 Using fallback redirect method...');
+    
+    const filename = normalizeUrlToFilename(cleanUrl);
+    const { proxyHostBase } = await chrome.storage.sync.get(['proxyHostBase']);
+    const base = (typeof proxyHostBase === 'string' && proxyHostBase.trim().length) 
+      ? proxyHostBase.trim() 
+      : DEFAULT_PROXY_HOST_BASE;
+    
+    // Create a simple redirect URL as immediate fallback
+    const redirectUrl = `data:text/html;charset=utf-8,${encodeURIComponent(generateProxyHtml(cleanUrl))}`;
+    const futureProxyUrl = `${base.replace(/\/$/, '')}/${filename}`;
+    
+    // Store the proxy data for potential manual deployment
+    const proxyData = {
+      url: cleanUrl,
+      filename: filename,
+      htmlContent: generateProxyHtml(cleanUrl),
+      timestamp: Date.now(),
+      created: new Date().toISOString()
+    };
+    
+    await chrome.storage.local.set({
+      [`proxy_${filename.replace('.html', '')}`]: proxyData
+    });
+    
+    console.log('✅ Fallback proxy generated');
+    
+    // Return immediate usable redirect URL
+    sendResponse({
+      ok: true,
+      pages_url: futureProxyUrl,
+      fallback_url: redirectUrl,
+      ready: false, // The Pages URL needs manual deployment
+      slug: filename.replace(/\.html$/, ''),
+      stage: 'fallback',
+      message: 'Redirect URL ready immediately. Deploy manually for permanent link.'
+    });
+    
+  } catch (error) {
+    console.error('❌ Error in handleProxyGeneration:', error);
+    sendResponse({
+      ok: false,
+      error: `Proxy generation failed: ${error.message}`,
+      stage: 'error'
+    });
+  }
+}
+
+// Cleanup old proxy data periodically
 chrome.runtime.onStartup.addListener(() => {
   cleanupOldProxyData();
 });
@@ -333,25 +384,47 @@ chrome.runtime.onStartup.addListener(() => {
 async function cleanupOldProxyData() {
   try {
     const data = await chrome.storage.local.get();
-    const now = Date.now();
-    const oneWeekAgo = now - (7 * 24 * 60 * 60 * 1000);
+    const cutoff = Date.now() - (7 * 24 * 60 * 60 * 1000); // 7 days
     
-    const keysToRemove = [];
-    
-    for (const [key, value] of Object.entries(data)) {
-      if (key.startsWith('pending_proxy_') && value.timestamp < oneWeekAgo) {
-        keysToRemove.push(key);
+    const toDelete = Object.keys(data).filter(key => {
+      if (key.startsWith('proxy_') || key.startsWith('pending_proxy_')) {
+        const item = data[key];
+        return item && item.timestamp && item.timestamp < cutoff;
       }
-      if (key.startsWith('proxy_') && value.generated < oneWeekAgo) {
-        keysToRemove.push(key);
-      }
-    }
+      return false;
+    });
     
-    if (keysToRemove.length > 0) {
-      await chrome.storage.local.remove(keysToRemove);
-      console.log(`🧹 Cleaned up ${keysToRemove.length} old proxy entries`);
+    if (toDelete.length > 0) {
+      await chrome.storage.local.remove(toDelete);
+      console.log(`🧹 Cleaned up ${toDelete.length} old proxy entries`);
     }
   } catch (error) {
-    console.error('Error cleaning up proxy data:', error);
+    console.error('Error during cleanup:', error);
+  }
+}
+
+// Export list of stored proxies for manual deployment
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === 'list:proxies') {
+    listStoredProxies().then(sendResponse);
+    return true;
+  }
+});
+
+async function listStoredProxies() {
+  try {
+    const data = await chrome.storage.local.get();
+    const proxies = Object.keys(data)
+      .filter(key => key.startsWith('proxy_'))
+      .map(key => ({
+        key,
+        ...data[key],
+        age: Date.now() - (data[key].timestamp || 0)
+      }))
+      .sort((a, b) => b.timestamp - a.timestamp);
+    
+    return { ok: true, proxies };
+  } catch (error) {
+    return { ok: false, error: error.message };
   }
 }
