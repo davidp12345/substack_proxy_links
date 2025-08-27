@@ -25,8 +25,20 @@ async function handleProxyGeneration(url, sendResponse) {
   try {
     console.log('🚀 Starting automatic proxy generation for:', url);
     
+    // Clean URL by removing @ prefix if it exists
+    let cleanUrl = url;
+    if (cleanUrl.startsWith('@')) {
+      cleanUrl = cleanUrl.substring(1);
+    }
+    
     // Validate URL
-    const urlObj = new URL(url);
+    let urlObj;
+    try {
+      urlObj = new URL(cleanUrl);
+    } catch (urlError) {
+      throw new Error('Invalid URL format: ' + cleanUrl);
+    }
+    
     if (!(urlObj.hostname.endsWith('substack.com') || urlObj.hostname === 'substack.com')) {
       throw new Error('Not a Substack URL');
     }
@@ -45,9 +57,9 @@ async function handleProxyGeneration(url, sendResponse) {
     }
 
     // Native-host fallback
-    const filename = normalizeUrlToFilename(url);
-    const htmlContent = generateProxyHtml(url);
-    const success = await generateAndDeployProxy(url, filename, htmlContent);
+    const filename = normalizeUrlToFilename(cleanUrl);
+    const htmlContent = generateProxyHtml(cleanUrl);
+    const success = await generateAndDeployProxy(cleanUrl, filename, htmlContent);
     if (success) {
       const { proxyHostBase } = await chrome.storage.sync.get(['proxyHostBase']);
       const base = (typeof proxyHostBase === 'string' && proxyHostBase.trim().length) ? proxyHostBase.trim() : DEFAULT_PROXY_HOST_BASE;
@@ -66,10 +78,16 @@ async function handleProxyGeneration(url, sendResponse) {
 
 async function generateViaVercel(url, apiBase){
   try{
+    // Clean URL by removing @ prefix if it exists
+    let cleanUrl = url;
+    if (cleanUrl.startsWith('@')) {
+      cleanUrl = cleanUrl.substring(1);
+    }
+    
     const res = await fetch(`${apiBase}/api/generate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url })
+      body: JSON.stringify({ url: cleanUrl })
     });
     const data = await res.json().catch(()=>({}));
     if (!data || data.ok !== true) {
@@ -93,10 +111,36 @@ async function generateViaVercel(url, apiBase){
 }
 
 function normalizeUrlToFilename(url) {
-  const u = new URL(url);
-  const host = u.hostname.replace(/\./g, '-');
-  const path = u.pathname.replace(/\//g, '-').replace(/^-+|[^a-zA-Z0-9\-]/g, '');
-  return `${host}-${path || 'home'}.html`;
+  try {
+    // Clean URL by removing @ prefix if it exists
+    let cleanUrl = url;
+    if (cleanUrl.startsWith('@')) {
+      cleanUrl = cleanUrl.substring(1);
+    }
+    
+    const u = new URL(cleanUrl);
+    const host = u.hostname.replace(/\./g, '-');
+    let path = u.pathname.replace(/\//g, '-').replace(/^-+/, '').replace(/[^a-zA-Z0-9\-]/g, '');
+    
+    // Handle query parameters for unique filenames
+    if (u.search) {
+      const searchParams = new URLSearchParams(u.search);
+      const importantParams = [];
+      // Include important parameters that make URLs unique
+      if (searchParams.get('source')) importantParams.push('source-' + searchParams.get('source'));
+      if (searchParams.get('utm_source')) importantParams.push('utm-' + searchParams.get('utm_source'));
+      if (importantParams.length > 0) {
+        path += '-' + importantParams.join('-');
+      }
+    }
+    
+    return `${host}-${path || 'home'}.html`;
+  } catch (error) {
+    console.error('Error normalizing URL to filename:', error);
+    // Fallback to a safe filename
+    const timestamp = Date.now();
+    return `substack-com-fallback-${timestamp}.html`;
+  }
 }
 
 function generateProxyHtml(originalUrl) {

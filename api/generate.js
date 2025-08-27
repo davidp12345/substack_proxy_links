@@ -10,8 +10,26 @@ export default async function handler(req, res) {
     if (req.method === 'OPTIONS') { res.status(200).end(); return; }
 
     if (req.method !== 'POST') { res.status(405).json({ ok:false, stage:'validation', error: 'Method not allowed' }); return; }
-    const { url } = req.body || {};
-    if (!url || !/^https?:\/\/([\w.-]+\.)?substack\.com\//i.test(url)) { res.status(400).json({ ok:false, stage:'validation', error: 'Invalid or missing Substack URL', hint:'Pass a full Substack post URL' }); return; }
+    let { url } = req.body || {};
+    
+    // Clean URL by removing @ prefix if it exists
+    if (url && url.startsWith('@')) {
+      url = url.substring(1);
+    }
+    
+    if (!url) { res.status(400).json({ ok:false, stage:'validation', error: 'Missing URL', hint:'Pass a full Substack post URL' }); return; }
+    
+    // Validate URL format
+    let urlObj;
+    try {
+      urlObj = new URL(url);
+    } catch (urlError) {
+      res.status(400).json({ ok:false, stage:'validation', error: 'Invalid URL format: ' + url, hint:'Pass a valid URL' }); return;
+    }
+    
+    if (!(urlObj.hostname.endsWith('.substack.com') || urlObj.hostname === 'substack.com')) { 
+      res.status(400).json({ ok:false, stage:'validation', error: 'Not a Substack URL: ' + urlObj.hostname, hint:'Pass a Substack post URL' }); return; 
+    }
     const target = process.env.TARGET_REPO;
     if (!target) { res.status(500).json({ ok:false, stage:'validation', error: 'Missing TARGET_REPO env', hint:'Set TARGET_REPO=owner/repo in Vercel env' }); return; }
     const [owner, repo] = String(target).split('/');
